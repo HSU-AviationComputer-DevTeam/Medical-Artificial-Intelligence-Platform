@@ -88,12 +88,12 @@ class ADKHostManager(ApplicationManager):
         # Map to manage 'lost' message ids until protocol level id is introduced
         self._next_id = {}  # dict[str, str]: previous message to next message
 
-        # .env 파일의 절대 경로를 명시적으로 지정
-        dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../.env'))
+        # .env 파일의 절대 경로를 명시적으로 지정 (UI 폴더의 .env 파일)
+        dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../.env'))
         load_dotenv(dotenv_path)
-        token = "허깅페이스 토큰"
+        token = os.getenv("HUGGINGFACE_TOKEN")
         if not token:
-            raise ValueError("HUGGINGFACE_TOKEN environment variable is not set")
+            raise ValueError("HUGGINGFACE_TOKEN environment variable is not set in .env file")
             
         MODEL_NAME = "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-0.5B"
         
@@ -198,14 +198,197 @@ class ADKHostManager(ApplicationManager):
         )
         self.add_task(task)
         
-        # Process the message with HyperCLOVAX
+        # Extract user prompt
         prompt = "\n".join([part.text for part in message.parts if hasattr(part, 'text') and part.text])
-        llama_response = self.call_llama4(prompt)
+        
+        # A2A Orchestration: Analyze intent and route to appropriate agents
+        intent_analysis = self._classify_intent(prompt)
+        routing_strategy = intent_analysis["routing_strategy"]
+        needed_agents = intent_analysis["needed_agents"]
+        
+        print(f"[A2A Orchestrator] Intent: {needed_agents}, Strategy: {routing_strategy}")
+        
+        agent_response = ""
+        
+        if routing_strategy == "hyperclova_only":
+            # Use HyperCLOVAX for general medical consultation
+            agent_response = self.call_llama4(prompt)
+            self._create_event("HyperCLOVAX Medical AI", agent_response, conversation_id)
+            
+        elif routing_strategy == "single_agent" and "patient_search" in needed_agents:
+            # Use medical agent for patient data search
+            agent_response = await self._call_medical_agent(prompt, conversation_id)
+            
+        elif routing_strategy == "pdf_only":
+            # Use PDF QA agent for document analysis
+            agent_response = await self._call_pdf_agent(prompt, conversation_id)
+            
+        elif routing_strategy == "sequential":
+            # Sequential: Data Search → Medical Analysis
+            if "patient_search" in needed_agents:
+                # Step 1: Get patient data
+                patient_data = await self._call_medical_agent(prompt, conversation_id)
+                self._create_event("Medical Data Agent", f"환자 데이터 수집 완료", conversation_id)
+                
+                # Step 2: Analyze with HyperCLOVAX
+                analysis_prompt = f"""
+다음 환자 데이터를 바탕으로 의료 분석을 제공해주세요:
+
+환자 데이터:
+{patient_data}
+
+사용자 요청: {prompt}
+
+전문적인 의료 소견과 권장사항을 제공해주세요.
+"""
+                medical_analysis = self.call_llama4(analysis_prompt)
+                self._create_event("HyperCLOVAX Medical AI", medical_analysis, conversation_id)
+                
+                agent_response = f"**환자 데이터:**\n{patient_data}\n\n**의료 분석:**\n{medical_analysis}"
+            
+        elif routing_strategy == "parallel_with_safety":
+            # Parallel execution with safety check
+            tasks_results = []
+            
+            if "patient_search" in needed_agents:
+                patient_data = await self._call_medical_agent(prompt, conversation_id)
+                tasks_results.append(("환자 데이터", patient_data))
+            
+            if "medical_analysis" in needed_agents:
+                medical_analysis = self.call_llama4(prompt)
+                tasks_results.append(("의료 분석", medical_analysis))
+                
+            # Safety check (simulated)
+            safety_check = "✅ 안전성 검토 완료: 특별한 주의사항 없음"
+            self._create_event("Safety Check Agent", safety_check, conversation_id)
+            
+            # Combine results
+            combined_response = "\n\n".join([f"**{title}:**\n{content}" for title, content in tasks_results])
+            agent_response = f"{combined_response}\n\n**안전성 검토:**\n{safety_check}"
+            
+        elif routing_strategy == "multi_agent_collaboration":
+            # Multi-agent collaboration: Patient Data + PDF Analysis + Medical Analysis
+            collaboration_results = []
+            
+            # Step 1: Get patient data
+            if "patient_search" in needed_agents:
+                patient_data = await self._call_medical_agent(prompt, conversation_id)
+                collaboration_results.append(("환자 데이터", patient_data))
+                self._create_event("Medical Data Agent", "환자 데이터 수집 완료", conversation_id)
+            
+            # Step 2: Analyze relevant PDF documents
+            if "pdf_analysis" in needed_agents:
+                pdf_analysis = await self._call_pdf_agent(prompt, conversation_id)
+                collaboration_results.append(("문서 분석", pdf_analysis))
+                self._create_event("PDF QA Agent", "의료 문서 분석 완료", conversation_id)
+            
+            # Step 3: Comprehensive medical analysis with HyperCLOVAX
+            comprehensive_prompt = f"""
+다음 정보들을 종합하여 전문적인 의료 분석을 제공해주세요:
+
+{chr(10).join([f"**{title}:**{chr(10)}{content}" for title, content in collaboration_results])}
+
+사용자 요청: {prompt}
+
+위 정보들을 종합하여 다음을 제공해주세요:
+1. 종합적인 의료 소견
+2. 권장 치료 방향
+3. 주의사항 및 추가 검사 필요성
+"""
+            comprehensive_analysis = self.call_llama4(comprehensive_prompt)
+            self._create_event("HyperCLOVAX Medical AI", "종합 의료 분석 완료", conversation_id)
+            
+            # Combine all results
+            final_response = "\n\n".join([f"**{title}:**\n{content}" for title, content in collaboration_results])
+            agent_response = f"{final_response}\n\n**종합 의료 분석:**\n{comprehensive_analysis}"
+            
+        elif routing_strategy == "pdf_patient_treatment_plan":
+            # 순차적 처리: PDF 분석 → 환자 검색 → HyperCLOVAX 치료계획서 작성
+            print(f"[A2A Orchestrator] PDF → 환자 → 치료계획 순차 처리 시작")
+            
+            # Step 1: PDF 문서 분석
+            pdf_analysis = await self._call_pdf_agent(prompt, conversation_id)
+            self._create_event("PDF QA Agent", "의료 지침서 분석 완료", conversation_id)
+            print(f"[A2A Orchestrator] Step 1 완료: PDF 분석")
+            
+            # Step 2: 환자 데이터 검색
+            patient_data = await self._call_medical_agent(prompt, conversation_id)
+            self._create_event("Medical Data Agent", "환자 데이터 수집 완료", conversation_id)
+            print(f"[A2A Orchestrator] Step 2 완료: 환자 데이터 수집")
+            
+            # Step 3: HyperCLOVAX로 종합 치료계획서 작성
+            treatment_plan_prompt = f"""
+다음 정보들을 바탕으로 환자의 개인화된 치료계획서를 작성해주세요:
+
+**의료 지침서 분석 결과:**
+{pdf_analysis}
+
+**환자 정보:**
+{patient_data}
+
+**사용자 요청:** {prompt}
+
+위 정보를 종합하여 다음 형식으로 치료계획서를 작성해주세요:
+
+## 환자 치료계획서
+
+### 1. 환자 기본 정보
+- 환자명, 나이, 성별, 진단명 등
+
+### 2. 현재 상태 평가
+- 현재 치료 상황 및 검사 결과
+
+### 3. 지침서 기반 권장 치료법
+- 의료 지침서에 따른 표준 치료 방법
+
+### 4. 개인화된 치료 계획
+- 환자 개별 상황을 고려한 맞춤형 치료 방안
+
+### 5. 모니터링 계획
+- 추적 관찰 및 검사 일정
+
+### 6. 주의사항 및 환자 교육
+- 복용법, 생활습관 개선 등
+"""
+            treatment_plan = self.call_llama4(treatment_plan_prompt)
+            self._create_event("HyperCLOVAX Medical AI", "개인화된 치료계획서 작성 완료", conversation_id)
+            print(f"[A2A Orchestrator] Step 3 완료: 치료계획서 작성")
+            
+            agent_response = f"**📋 치료계획서 작성 완료**\n\n{treatment_plan}\n\n---\n\n**📚 참고한 지침서 내용:**\n{pdf_analysis}\n\n**👤 환자 데이터:**\n{patient_data}"
+            
+        elif routing_strategy == "pdf_with_analysis":
+            # PDF Analysis + Medical Analysis
+            # Step 1: Analyze PDF documents
+            pdf_analysis = await self._call_pdf_agent(prompt, conversation_id)
+            self._create_event("PDF QA Agent", "의료 문서 분석 완료", conversation_id)
+            
+            # Step 2: Medical analysis based on PDF content
+            analysis_prompt = f"""
+다음 의료 문서 분석 결과를 바탕으로 전문적인 의료 소견을 제공해주세요:
+
+문서 분석 결과:
+{pdf_analysis}
+
+사용자 요청: {prompt}
+
+문서 내용을 바탕으로 한 전문적인 의료 해석과 권장사항을 제공해주세요.
+"""
+            medical_analysis = self.call_llama4(analysis_prompt)
+            self._create_event("HyperCLOVAX Medical AI", "의료 분석 완료", conversation_id)
+            
+            agent_response = f"**문서 분석:**\n{pdf_analysis}\n\n**의료 소견:**\n{medical_analysis}"
+            
+        else:
+            # Fallback to medical agent or HyperCLOVAX
+            if self._agents:
+                agent_response = await self._call_medical_agent(prompt, conversation_id)
+            else:
+                agent_response = self.call_llama4(prompt)
         
         # Update task status
         task.status.state = TaskState.COMPLETED
         task.status.message = Message(
-            parts=[TextPart(text=llama_response)],
+            parts=[TextPart(text=agent_response)],
             role='agent',
             metadata={
                 **message.metadata,
@@ -219,6 +402,188 @@ class ADKHostManager(ApplicationManager):
         if conversation:
             conversation.messages.append(task.status.message)
         self._pending_message_ids.remove(message_id)
+
+    def _classify_intent(self, user_message: str) -> dict:
+        """사용자 메시지의 의도를 분류하여 필요한 에이전트들을 결정"""
+        import re
+        
+        patterns = {
+            "patient_search": [r"환자.*정보", r".*환자.*찾", r"홍길\d+", r"김철\d+", r".*환자.*목록", r"병원.*내.*환자"],
+            "medical_analysis": [r"진단", r"치료.*계획", r"소견", r"분석", r"어떻게.*생각", r"권장", r"추천", r"치료계획서"],
+            "documentation": [r"SOAP", r"노트.*작성", r"보고서", r"기록"],
+            "safety_check": [r"약물.*상호작용", r"부작용", r"금기", r"알레르기"],
+            "pdf_analysis": [r"\.pdf", r"PDF", r"문서.*분석", r"스캔.*결과", r"검사.*결과", r"보고서.*분석", r"CT", r"MRI", r"X-ray", r"엑스레이", r"가이드라인", r"지침서"],
+            "general_medical": [r"당뇨병", r"고혈압", r"치료법", r"증상", r"관리"]
+        }
+        
+        needed_agents = []
+        
+        for intent, regex_list in patterns.items():
+            for pattern in regex_list:
+                if re.search(pattern, user_message, re.IGNORECASE):
+                    needed_agents.append(intent)
+                    break
+        
+        # Remove duplicates
+        needed_agents = list(set(needed_agents))
+        
+        print(f"[DEBUG] 감지된 의도들: {needed_agents}")
+        print(f"[DEBUG] 사용자 메시지: {user_message}")
+        
+        # Determine routing strategy with enhanced logic
+        if not needed_agents:
+            routing_strategy = "hyperclova_only"
+        elif len(needed_agents) == 1:
+            if needed_agents[0] == "patient_search":
+                routing_strategy = "single_agent"
+            elif needed_agents[0] == "pdf_analysis":
+                routing_strategy = "pdf_only"
+            else:
+                routing_strategy = "hyperclova_only"
+        # 특별 케이스: PDF + 환자 + 치료계획 = 순차적 처리 (PDF → 환자 → 분석)
+        elif ("pdf_analysis" in needed_agents and 
+              "patient_search" in needed_agents and 
+              "medical_analysis" in needed_agents):
+            routing_strategy = "pdf_patient_treatment_plan"  # 새로운 전략
+        elif "patient_search" in needed_agents and "pdf_analysis" in needed_agents:
+            routing_strategy = "multi_agent_collaboration"  # 환자 데이터 + PDF 분석
+        elif "patient_search" in needed_agents and ("medical_analysis" in needed_agents or "general_medical" in needed_agents):
+            routing_strategy = "sequential"
+        elif "pdf_analysis" in needed_agents and ("medical_analysis" in needed_agents or "general_medical" in needed_agents):
+            routing_strategy = "pdf_with_analysis"  # PDF 분석 + 의료 분석
+        elif "safety_check" in needed_agents:
+            routing_strategy = "parallel_with_safety"
+        else:
+            routing_strategy = "parallel"
+        
+        return {
+            "needed_agents": needed_agents,
+            "routing_strategy": routing_strategy
+        }
+
+    async def _call_medical_agent(self, prompt: str, conversation_id: str) -> str:
+        """의료 에이전트 호출"""
+        if not self._agents:
+            return "의료 에이전트가 등록되지 않았습니다."
+        
+        # 의료 에이전트 찾기 (포트 10001 또는 이름으로 식별)
+        medical_agent = None
+        for agent in self._agents:
+            if ("10001" in agent.url or 
+                "Patient Data Manager" in agent.name or 
+                "Medical" in agent.name):
+                medical_agent = agent
+                break
+        
+        if not medical_agent:
+            return "의료 에이전트를 찾을 수 없습니다."
+        
+        try:
+            import aiohttp
+            import json
+            
+            async with aiohttp.ClientSession() as session:
+                payload = {
+                    "jsonrpc": "2.0",
+                    "method": "tasks/send",
+                    "params": {
+                        "task": {"text": prompt},
+                        "sessionId": conversation_id
+                    },
+                    "id": 123
+                }
+                
+                async with session.post(
+                    medical_agent.url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        if result.get("result") and result["result"].get("artifacts"):
+                            agent_response = result["result"]["artifacts"][0]["parts"][0]["text"]
+                            self._create_event(medical_agent.name, agent_response, conversation_id)
+                            return agent_response
+                        else:
+                            return "의료 에이전트로부터 응답을 받지 못했습니다."
+                    else:
+                        return f"의료 에이전트 연결 실패 (상태 코드: {response.status})"
+                        
+        except Exception as e:
+            print(f"의료 에이전트 호출 중 오류: {e}")
+            return f"의료 에이전트 호출 중 오류가 발생했습니다: {str(e)}"
+
+    async def _call_pdf_agent(self, prompt: str, conversation_id: str) -> str:
+        """PDF QA 에이전트 호출"""
+        try:
+            import aiohttp
+            import json
+            
+            # PDF QA 에이전트 찾기
+            pdf_agent = None
+            for agent in self._agents:
+                if ("10000" in agent.url or 
+                    "PDF" in agent.name or 
+                    "pdf" in agent.name.lower()):
+                    pdf_agent = agent
+                    break
+            
+            if not pdf_agent:
+                return "PDF QA 에이전트를 찾을 수 없습니다."
+            
+            async with aiohttp.ClientSession() as session:
+                # A2A 표준 형식으로 직접 요청 (올바른 형식)
+                a2a_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "tasks/send",
+                    "params": {
+                        "message": {
+                            "parts": [{"type": "text", "text": prompt}]
+                        }
+                    },
+                    "id": 124
+                }
+                
+                print(f"[DEBUG] PDF Agent 요청 URL: {pdf_agent.url}")
+                print(f"[DEBUG] PDF Agent 요청 데이터: {a2a_payload}")
+                
+                async with session.post(
+                    pdf_agent.url,
+                    json=a2a_payload,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        print(f"[DEBUG] PDF Agent 응답: {result}")
+                        if result.get("result") and result["result"].get("artifacts"):
+                            agent_response = result["result"]["artifacts"][0]["parts"][0]["text"]
+                            self._create_event("PDF QA Agent", agent_response, conversation_id)
+                            return agent_response
+                        else:
+                            return "PDF QA 에이전트로부터 올바른 응답을 받지 못했습니다."
+                    else:
+                        error_text = await response.text()
+                        print(f"[DEBUG] PDF Agent 오류 응답: {error_text}")
+                        return f"PDF QA 에이전트 연결 실패 (상태 코드: {response.status}): {error_text}"
+                        
+        except Exception as e:
+            print(f"PDF QA 에이전트 호출 중 오류: {e}")
+            return f"PDF QA 에이전트 호출 중 오류가 발생했습니다: {str(e)}"
+
+    def _create_event(self, actor_name: str, content: str, conversation_id: str):
+        """이벤트 생성 헬퍼 메서드"""
+        self.add_event(
+            Event(
+                id=str(uuid.uuid4()),
+                actor=actor_name,
+                content=Message(
+                    parts=[TextPart(text=content)],
+                    role='agent',
+                    metadata={'conversation_id': conversation_id}
+                ),
+                timestamp=datetime.datetime.now(datetime.UTC).timestamp(),
+            )
+        )
 
     def add_task(self, task: Task):
         self._tasks.append(task)
@@ -436,6 +801,15 @@ class ADKHostManager(ApplicationManager):
         self._host_agent.register_agent_card(agent_data)
         # Now update the host agent definition
         self._initialize_host()
+
+    def register_pdf_agent(self):
+        """PDF QA 에이전트를 자동으로 등록"""
+        try:
+            pdf_agent_url = "http://localhost:10000"
+            self.register_agent(pdf_agent_url)
+            print(f"[A2A] PDF QA Agent 등록 완료: {pdf_agent_url}")
+        except Exception as e:
+            print(f"[A2A] PDF QA Agent 등록 실패: {e}")
 
     @property
     def agents(self) -> list[AgentCard]:

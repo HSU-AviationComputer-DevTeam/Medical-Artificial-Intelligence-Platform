@@ -1,18 +1,24 @@
 import logging
 import os
+import sys
+
+# 프로젝트 루트를 Python 경로에 추가
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 import click
 
-from agents.langgraph.agent import PDFQAAgent
-from agents.langgraph.task_manager import AgentTaskManager
-from common.server import A2AServer
-from common.types import (
+from hi_medei.samples.python.agents.langgraph.agent import PDFQAAgent
+from hi_medei.samples.python.agents.langgraph.task_manager import AgentTaskManager
+from hi_medei.samples.python.common.server import A2AServer
+from hi_medei.samples.python.common.types import (
     AgentCapabilities,
     AgentCard,
     AgentSkill,
     MissingAPIKeyError,
 )
-from common.utils.push_notification_auth import PushNotificationSenderAuth
+from hi_medei.samples.python.common.utils.push_notification_auth import PushNotificationSenderAuth
 from dotenv import load_dotenv
 
 from starlette.requests import Request

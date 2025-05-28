@@ -1,0 +1,19 @@
+# OpenAI API Configuration
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Server Configuration
+HOST=localhost
+PORT=10001
+
+# Database Configuration
+CHROMA_DB_PATH=./medical_chroma_db
+PATIENT_DATA_PATH=../../../../data
+
+# Logging Configuration
+LOG_LEVEL=INFO
+LOG_FILE=logs/medical_agent.log
+
+# Medical Agent Configuration
+MAX_SEARCH_RESULTS=10
+SIMILARITY_THRESHOLD=0.7
+ENABLE_DRUG_INTERACTION_CHECK=true 

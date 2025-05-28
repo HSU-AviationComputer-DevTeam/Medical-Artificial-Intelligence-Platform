@@ -1,10 +1,17 @@
 import asyncio
 import logging
+import os
+import sys
 from typing import Any, AsyncIterable
 
-from agents.langgraph.agent import PDFQAAgent
-from common.server.task_manager import InMemoryTaskManager
-from common.types import (
+# 프로젝트 루트를 Python 경로에 추가
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from hi_medei.samples.python.agents.langgraph.agent import PDFQAAgent
+from hi_medei.samples.python.common.server.task_manager import InMemoryTaskManager
+from hi_medei.samples.python.common.types import (
     Artifact,
     InternalError,
     InvalidParamsError,
@@ -51,7 +58,7 @@ class StreamingTask:
         self.task = task
         self.done = done
         self.taskId = taskId or task.id
-from common.utils.push_notification_auth import PushNotificationSenderAuth
+from hi_medei.samples.python.common.utils.push_notification_auth import PushNotificationSenderAuth
 
 logger = logging.getLogger(__name__)
 

@@ -14,12 +14,19 @@ from langgraph.prebuilt import create_react_agent
 
 memory = MemorySaver()
 
-# OpenAI API 키 설정 - 임시로 여기에 정의하거나 환경변수에서 가져옴
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# OpenAI API 키 설정 - 환경변수에서 가져옴
+from dotenv import load_dotenv
+load_dotenv()  # 다시 한번 로드
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
-    print("⚠️ OPENAI_API_KEY 환경변수가 설정되지 않아 하드코딩된 키를 사용합니다.")
-    # 하드코딩된 API 키 사용
-    OPENAI_API_KEY = "오픈api키"
+    # 공백 제거하여 다시 시도
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+    
+if not OPENAI_API_KEY:
+    print("⚠️ OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
+    print("현재 환경변수:", repr(os.getenv("OPENAI_API_KEY")))
+    raise ValueError("OPENAI_API_KEY 환경변수를 설정해주세요.")
 
 # PDF 파싱 함수
 def parse_pdf(file_path: str) -> str:
