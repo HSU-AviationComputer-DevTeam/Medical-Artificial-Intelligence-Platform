@@ -31,10 +31,10 @@ class PatientSearchTool(BaseTool):
     
     name: str = "patient_search"
     description: str = "환자 ID, 이름, 증상으로 환자를 검색합니다."
-    data_path: str = Field(default="../../../../VectorStore2/medical_data")
+    data_path: str = Field(default="../../../../../VectorStore2/medical_data")
     patients_data: Dict[str, List[Dict]] = Field(default_factory=dict)
     
-    def __init__(self, data_path: str = "../../../../VectorStore2/medical_data", **kwargs):
+    def __init__(self, data_path: str = "../../../../../VectorStore2/medical_data", **kwargs):
         super().__init__(**kwargs)
         self.data_path = data_path
         self.patients_data = self._load_patient_data()
@@ -92,12 +92,16 @@ class PatientSearchTool(BaseTool):
         
         return data
     
-    def _run(self, query: str, query_type: str = "name", max_results: int = 10) -> str:
+    def _run(self, query: str, query_type: str = "auto", max_results: int = 10) -> str:
         """환자 검색을 실행합니다."""
         start_time = time.time()
         results = []
         
         query_lower = query.lower()
+        
+        # 자동 쿼리 타입 감지
+        if query_type == "auto":
+            query_type = self._detect_query_type(query_lower)
         
         # 쿼리에서 검색 타입과 값을 파싱
         if ":" in query:
@@ -116,39 +120,121 @@ class PatientSearchTool(BaseTool):
                     query_type = "diagnosis"
                     query_lower = search_value.lower()
         
+        print(f"🔍 검색 실행: '{query}' (타입: {query_type})")
+        
+        # 복합 검색: 여러 필드에서 동시 검색
         for dept, patients in self.patients_data.items():
             for patient in patients:
                 match_found = False
+                match_fields = []
                 
-                if query_type == "name" and query_lower in patient.get('name', '').lower():
+                # 이름 검색
+                if query_type in ["name", "all"] and query_lower in patient.get('name', '').lower():
                     match_found = True
-                elif query_type == "id" and query_lower in patient.get('id', '').lower():
+                    match_fields.append("이름")
+                
+                # ID 검색
+                if query_type in ["id", "all"] and query_lower in patient.get('id', '').lower():
                     match_found = True
-                elif query_type == "diagnosis" and query_lower in patient.get('diagnosis', '').lower():
-                    match_found = True
-                elif query_type == "symptom":
+                    match_fields.append("ID")
+                
+                # 진단 검색 (의료 용어 매핑 포함)
+                if query_type in ["diagnosis", "all"]:
+                    # diagnoses 배열에서 검색
+                    diagnoses = patient.get('diagnoses', [])
+                    if isinstance(diagnoses, list):
+                        for diag in diagnoses:
+                            if isinstance(diag, dict):
+                                diag_name = diag.get('name', '').lower()
+                                if self._matches_medical_term(query_lower, diag_name):
+                                    match_found = True
+                                    match_fields.append("진단")
+                                    break
+                    
+                    # 단일 diagnosis 필드도 확인 (하위 호환성)
+                    diagnosis = patient.get('diagnosis', '').lower()
+                    if diagnosis and self._matches_medical_term(query_lower, diagnosis):
+                        match_found = True
+                        match_fields.append("진단")
+                
+                # 증상 검색
+                if query_type in ["symptom", "all"]:
                     symptoms = patient.get('symptoms', [])
                     if isinstance(symptoms, list):
-                        if any(query_lower in symptom.lower() for symptom in symptoms):
-                            match_found = True
-                    elif isinstance(symptoms, str) and query_lower in symptoms.lower():
+                        for symptom in symptoms:
+                            if self._matches_medical_term(query_lower, symptom.lower()):
+                                match_found = True
+                                match_fields.append("증상")
+                                break
+                    elif isinstance(symptoms, str) and self._matches_medical_term(query_lower, symptoms.lower()):
                         match_found = True
+                        match_fields.append("증상")
                 
                 if match_found:
-                    results.append(patient)
+                    patient_result = patient.copy()
+                    patient_result['match_fields'] = match_fields
+                    results.append(patient_result)
         
         search_time = time.time() - start_time
         
         # 결과 제한
         results = results[:max_results]
         
+        print(f"✅ 검색 완료: {len(results)}명 발견 ({search_time:.3f}초)")
+        
         return json.dumps({
             "patients": results,
             "total_count": len(results),
             "search_time": search_time,
             "query": query,
-            "query_type": query_type
+            "query_type": query_type,
+            "search_performed": True
         }, ensure_ascii=False, indent=2)
+    
+    def _detect_query_type(self, query: str) -> str:
+        """쿼리 타입을 자동으로 감지합니다."""
+        # 의료 용어나 증상 관련 키워드 감지
+        medical_terms = ['환자', '병', '질환', '증상', '통증', '열', '기침', '두통', '복통', '당뇨', '고혈압', '암', '심장', '폐', '간', '신장']
+        
+        if any(term in query for term in medical_terms):
+            if '환자' in query:
+                return "diagnosis"  # "당뇨병환자" -> 진단명으로 검색
+            else:
+                return "symptom"
+        
+        # ID 패턴 감지 (P001, H123 등)
+        if len(query) <= 10 and any(char.isdigit() for char in query):
+            return "id"
+        
+        # 기본값은 전체 검색
+        return "all"
+    
+    def _matches_medical_term(self, search_term: str, target_text: str) -> bool:
+        """의료 용어 매칭 (유사어 및 부분 매칭 포함)"""
+        # 직접 매칭
+        if search_term in target_text:
+            return True
+        
+        # 의료 용어 매핑
+        medical_mappings = {
+            '당뇨': ['diabetes', '당뇨병', 'dm', '혈당'],
+            '고혈압': ['hypertension', '혈압', 'htn', '고혈압증'],
+            '심장': ['cardiac', 'heart', '심근', '관상동맥'],
+            '암': ['cancer', '종양', 'tumor', 'carcinoma'],
+            '열': ['fever', '발열', '체온'],
+            '통증': ['pain', '아픔', 'ache'],
+            '기침': ['cough', '해수'],
+            '호흡': ['breathing', 'respiratory', '숨', '호흡곤란']
+        }
+        
+        # 매핑된 용어로 검색
+        for key, synonyms in medical_mappings.items():
+            if key in search_term:
+                for synonym in synonyms:
+                    if synonym in target_text:
+                        return True
+        
+        return False
 
 
 class VectorSearchTool(BaseTool):
@@ -168,59 +254,123 @@ class VectorSearchTool(BaseTool):
     def _initialize_vectorstore(self):
         """벡터스토어를 초기화합니다."""
         try:
-            # GeminiVectorStore 경로 사용
-            gemini_vector_path = "/Users/sindong-u/coding/project/hi_medei/GeminiVectorStore/medical_vector_store"
+            # 실제 벡터스토어 경로 사용
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.join(current_dir, "../../../../..")
+            vector_path = os.path.join(project_root, "VectorStore2", "vector_stores", "medical_vector_store")
+            vector_path = os.path.abspath(vector_path)
+            
+            print(f"🔍 벡터스토어 경로: {vector_path}")
             
             # FAISS 벡터스토어 로드 시도
-            import pickle
-
-            import faiss
-
-            # 인덱스 파일들 확인
-            index_path = os.path.join(gemini_vector_path, "index.faiss")
-            pkl_path = os.path.join(gemini_vector_path, "index.pkl")
+            try:
+                from langchain_community.vectorstores import FAISS
+                from langchain_openai import OpenAIEmbeddings
+                
+                if self.openai_api_key:
+                    embeddings = OpenAIEmbeddings(openai_api_key=self.openai_api_key)
+                    # FAISS 벡터스토어 로드
+                    self.vectorstore = FAISS.load_local(vector_path, embeddings, allow_dangerous_deserialization=True)
+                    print("✅ FAISS 벡터스토어 로드 성공!")
+                    return
+                else:
+                    print("⚠️ OpenAI API 키가 없어 벡터스토어를 로드할 수 없습니다.")
+            except Exception as e:
+                print(f"❌ FAISS 로드 실패: {e}")
+            
+            # 대안: ChromaDB 시도
+            try:
+                # ChromaDB 벡터스토어 로드 시도
+                chroma_path = os.path.join(vector_path, "chroma_db")
+                if os.path.exists(chroma_path):
+                    print(f"🔍 ChromaDB 시도: {chroma_path}")
+                    self.vectorstore = "chroma_available"
+                    print("✅ ChromaDB 벡터스토어 발견!")
+                    return
+            except Exception as e:
+                print(f"❌ ChromaDB 로드 실패: {e}")
+            
+            # 파일 확인
+            index_path = os.path.join(vector_path, "index.faiss")
+            pkl_path = os.path.join(vector_path, "index.pkl")
+            
+            print(f"📁 FAISS 파일 확인:")
+            print(f"  - index.faiss: {os.path.exists(index_path)}")
+            print(f"  - index.pkl: {os.path.exists(pkl_path)}")
             
             if os.path.exists(index_path) and os.path.exists(pkl_path):
-                print(f"GeminiVectorStore 로드 시도: {gemini_vector_path}")
-                # 간단한 FAISS 벡터스토어 로드
-                self.vectorstore = "faiss_loaded"  # 실제 구현은 FAISS 로드
-                print("GeminiVectorStore 로드 성공")
+                self.vectorstore = "faiss_files_found"
+                print("✅ 벡터스토어 파일들을 발견했습니다!")
             else:
-                print("GeminiVectorStore 파일을 찾을 수 없습니다.")
+                print("❌ 벡터스토어 파일을 찾을 수 없습니다.")
                 
         except Exception as e:
-            print(f"Vector store initialization error: {e}")
+            print(f"❌ Vector store initialization error: {e}")
     
     def _run(self, symptoms: str, k: int = 5) -> str:
         """유사 증상 환자를 검색합니다."""
         if not self.vectorstore:
-            return json.dumps({"error": "Vector store not available"})
+            return json.dumps({"error": "Vector store not available"}, ensure_ascii=False)
         
         try:
-            # 실제 구현에서는 FAISS 검색을 수행
-            # 현재는 시뮬레이션된 결과 반환
-            results = [
-                {
-                    "content": f"유사 증상 환자 사례: {symptoms}와 관련된 환자",
-                    "metadata": {"patient_id": "SIM001", "similarity": 0.85},
-                    "similarity_score": 0.85
-                },
-                {
-                    "content": f"{symptoms} 증상을 보인 과거 환자 기록",
-                    "metadata": {"patient_id": "SIM002", "similarity": 0.78},
-                    "similarity_score": 0.78
-                }
-            ]
+            # 실제 FAISS 벡터스토어가 로드된 경우
+            if hasattr(self.vectorstore, 'similarity_search_with_score'):
+                print(f"🔍 벡터 검색 실행: '{symptoms}'")
+                
+                # 벡터 검색 수행
+                docs_with_scores = self.vectorstore.similarity_search_with_score(symptoms, k=k)
+                
+                results = []
+                for doc, score in docs_with_scores:
+                    results.append({
+                        "content": doc.page_content,
+                        "metadata": doc.metadata,
+                        "similarity_score": float(1 - score)  # 거리를 유사도로 변환
+                    })
+                
+                print(f"✅ 벡터 검색 완료: {len(results)}개 결과 발견")
+                
+                return json.dumps({
+                    "similar_cases": results,
+                    "query": symptoms,
+                    "total_found": len(results),
+                    "source": "FAISS VectorStore",
+                    "search_type": "semantic_vector_search"
+                }, ensure_ascii=False, indent=2)
             
-            return json.dumps({
-                "similar_cases": results,
-                "query": symptoms,
-                "total_found": len(results),
-                "source": "GeminiVectorStore"
-            }, ensure_ascii=False, indent=2)
+            # 벡터스토어 파일이 있지만 로드되지 않은 경우
+            elif self.vectorstore in ["faiss_files_found", "chroma_available"]:
+                print(f"⚠️ 벡터스토어 파일은 있지만 OpenAI API 키가 없어 시맨틱 검색을 할 수 없습니다.")
+                
+                # 대안: JSON 데이터에서 키워드 기반 검색
+                from medical_tools import PatientSearchTool
+                patient_search = PatientSearchTool()
+                
+                # 증상 기반 검색
+                symptom_results = patient_search._run(symptoms, query_type="symptom")
+                # 진단 기반 검색  
+                diagnosis_results = patient_search._run(symptoms, query_type="diagnosis")
+                
+                return json.dumps({
+                    "message": "벡터 검색 대신 키워드 기반 검색 사용",
+                    "symptom_search": json.loads(symptom_results),
+                    "diagnosis_search": json.loads(diagnosis_results),
+                    "query": symptoms,
+                    "source": "JSON 키워드 검색 (벡터스토어 사용 불가)",
+                    "note": "OpenAI API 키 설정 시 벡터 검색 가능"
+                }, ensure_ascii=False, indent=2)
+            
+            else:
+                return json.dumps({
+                    "error": "Vector store not properly initialized",
+                    "vectorstore_status": str(self.vectorstore)
+                }, ensure_ascii=False)
             
         except Exception as e:
-            return json.dumps({"error": f"Vector search failed: {e}"})
+            print(f"❌ 벡터 검색 실패: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return json.dumps({"error": f"Vector search failed: {str(e)}"}, ensure_ascii=False)
 
 
 class SOAPNoteGeneratorTool(BaseTool):

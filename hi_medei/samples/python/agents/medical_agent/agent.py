@@ -1,26 +1,26 @@
 """Patient Data Manager Agent - Main agent implementation."""
 
-import os
 import json
-from typing import Any, Dict, List, Optional, AsyncIterable
+import os
 from datetime import datetime
+from typing import Any, AsyncIterable, Dict, List, Optional
 
-from langchain_openai import ChatOpenAI
-from langchain.agents import AgentExecutor, create_react_agent
-from langchain.prompts import PromptTemplate
-from langchain.memory import ConversationBufferMemory
 from langchain import hub
+from langchain.agents import AgentExecutor, create_react_agent
+from langchain.memory import ConversationBufferMemory
+from langchain.prompts import PromptTemplate
+from langchain_openai import ChatOpenAI
 
 from medical_tools import (
-    PatientSearchTool,
-    VectorSearchTool,
-    SOAPNoteGeneratorTool,
     DrugInteractionCheckerTool,
-    UrgencyAssessmentTool,
     HybridSearchTool,
-    MCPConnectorTool
+    MCPConnectorTool,
+    PatientSearchTool,
+    SOAPNoteGeneratorTool,
+    UrgencyAssessmentTool,
+    VectorSearchTool,
 )
-from models import PatientSearchQuery, MedicalRecord
+from models import MedicalRecord, PatientSearchQuery
 
 
 class PatientDataManagerAgent:
@@ -178,7 +178,7 @@ class PatientDataManagerAgent:
             print(f"[DEBUG] 응답 생성 완료: {response_content[:100]}...")
             
             # 메모리에 대화 추가
-            from langchain.schema import HumanMessage, AIMessage
+            from langchain.schema import AIMessage, HumanMessage
             self.memory.chat_memory.add_user_message(query)
             self.memory.chat_memory.add_ai_message(response_content)
             
@@ -226,23 +226,44 @@ class PatientDataManagerAgent:
                         else:
                             return f"'{re.search(pattern, query).group()}' 환자의 정보를 찾을 수 없습니다."
         
-        # 질병명 검색
-        diseases = ['당뇨병', '고혈압', '담낭염', '위염', '감기', '독감']
+        # 질병명 검색 - 벡터 검색 우선!
+        diseases = ['당뇨병', '고혈압', '담낭염', '위염', '감기', '독감', '환자']
         for disease in diseases:
             if disease in query:
-                print(f"[DEBUG] 질병명 발견: {disease}")
-                # patient_search 도구 사용
+                print(f"[DEBUG] 질병명 발견: {disease} - 벡터 검색 우선 실행")
+                # hybrid_search 도구 사용 (벡터 + JSON 결합)
                 for tool in self.tools:
-                    if tool.name == "patient_search":
-                        result = tool._run(f"진단: {disease}")
+                    if tool.name == "hybrid_search":
+                        result = tool._run(query)
                         result_data = json.loads(result)
-                        if result_data["total_count"] > 0:
-                            patients_info = []
-                            for patient in result_data["patients"][:5]:  # 최대 5명
-                                patients_info.append(f"- {patient['name']} ({patient['age']}세, {patient['gender']})")
-                            return f"'{disease}' 환자 {result_data['total_count']}명을 찾았습니다:\n" + "\n".join(patients_info)
+                        
+                        # 벡터 검색 결과 확인
+                        vector_results = result_data.get("vector_results", {})
+                        json_results = result_data.get("json_results", {})
+                        
+                        response_parts = []
+                        
+                        # 벡터 검색 결과 (의미적 유사도)
+                        if vector_results.get("total_found", 0) > 0:
+                            response_parts.append("🧠 **벡터 검색 결과 (의미적 유사도)**:")
+                            similar_cases = vector_results.get("similar_cases", [])[:3]
+                            for i, case in enumerate(similar_cases, 1):
+                                similarity = case.get("similarity_score", 0)
+                                content = case.get("content", "")[:100]
+                                response_parts.append(f"{i}. 유사도 {similarity:.2f}: {content}...")
+                        
+                        # JSON 구조화 검색 결과
+                        if json_results.get("total_count", 0) > 0:
+                            response_parts.append(f"\n📊 **구조화된 데이터 검색**: {json_results['total_count']}명 발견")
+                            patients = json_results["patients"][:3]
+                            for patient in patients:
+                                match_fields = patient.get('match_fields', [])
+                                response_parts.append(f"- {patient['name']} ({patient['age']}세, {patient['department']}) - 매칭: {', '.join(match_fields)}")
+                        
+                        if response_parts:
+                            return "\n".join(response_parts)
                         else:
-                            return f"'{disease}' 환자를 찾을 수 없습니다."
+                            return f"'{disease}' 관련 환자나 사례를 찾을 수 없습니다."
         
         # 일반적인 환자 검색
         if any(keyword in query_lower for keyword in ['환자', '검색', '찾', '정보']):
