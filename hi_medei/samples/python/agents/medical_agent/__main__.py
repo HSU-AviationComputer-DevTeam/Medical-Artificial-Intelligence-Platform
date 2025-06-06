@@ -1,26 +1,25 @@
 """Main entry point for Patient Data Manager Agent A2A server."""
 
-import os
-import sys
 import argparse
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional, AsyncIterable
+import os
+import sys
+from typing import Any, AsyncIterable, Dict, List, Optional
 
 # 현재 디렉토리를 Python 경로에 추가
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
+import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-import uvicorn
 from pydantic import BaseModel
-from dotenv import load_dotenv
 
 # 상대 임포트 사용
 from agent import PatientDataManagerAgent
 from task_manager import TaskManager
-
 
 # 환경변수 로드
 load_dotenv()
@@ -71,10 +70,24 @@ async def startup_event():
         logger.error("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
         raise ValueError("OPENAI_API_KEY is required")
     
-    # 데이터 경로 설정 (절대 경로 강제 사용)
-    data_path = "/Users/sindong-u/coding/project/hi_medei/data"
-    print(f"[DEBUG] 강제 설정된 데이터 경로: {data_path}")
-    print(f"[DEBUG] 경로 존재 여부: {os.path.exists(data_path)}")
+    # 데이터 경로 설정 (VectorStore2/medical_data 사용)
+    # 현재 스크립트 위치에서 상대 경로로 데이터 디렉토리 찾기
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # hi_medei/samples/python/agents/medical_agent -> 프로젝트 루트로 5단계 상위
+    project_root = os.path.join(current_dir, "../../../../..")
+    data_path = os.path.join(project_root, "VectorStore2", "medical_data")
+    data_path = os.path.abspath(data_path)
+    
+    print(f"🔍 현재 디렉토리: {current_dir}")
+    print(f"📁 프로젝트 루트: {os.path.abspath(project_root)}")
+    print(f"📊 데이터 경로: {data_path}")
+    print(f"✅ 경로 존재 여부: {os.path.exists(data_path)}")
+    
+    if os.path.exists(data_path):
+        json_files = [f for f in os.listdir(data_path) if f.endswith('.json')]
+        print(f"📋 발견된 JSON 파일들: {json_files}")
+    else:
+        print(f"❌ 데이터 경로가 존재하지 않습니다: {data_path}")
     
     try:
         # 에이전트 초기화

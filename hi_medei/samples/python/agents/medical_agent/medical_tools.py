@@ -1,22 +1,28 @@
 """Medical tools for patient search, document generation, and analysis."""
 
-import os
 import json
-import pandas as pd
-import numpy as np
-from typing import List, Dict, Any, Optional
-from datetime import datetime
+import os
 import time
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
+import numpy as np
+import pandas as pd
 from langchain.tools import BaseTool
-from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings
 from pydantic import BaseModel, Field
 
 from models import (
-    Patient, MedicalRecord, SOAPNote, PatientSearchQuery, 
-    PatientSearchResult, DrugInteraction, MedicalAnalysis,
-    DepartmentType, UrgencyLevel
+    DepartmentType,
+    DrugInteraction,
+    MedicalAnalysis,
+    MedicalRecord,
+    Patient,
+    PatientSearchQuery,
+    PatientSearchResult,
+    SOAPNote,
+    UrgencyLevel,
 )
 
 
@@ -25,10 +31,10 @@ class PatientSearchTool(BaseTool):
     
     name: str = "patient_search"
     description: str = "환자 ID, 이름, 증상으로 환자를 검색합니다."
-    data_path: str = Field(default="/Users/sindong-u/coding/project/hi_medei/data")
+    data_path: str = Field(default="../../../../VectorStore2/medical_data")
     patients_data: Dict[str, List[Dict]] = Field(default_factory=dict)
     
-    def __init__(self, data_path: str = "/Users/sindong-u/coding/project/hi_medei/data", **kwargs):
+    def __init__(self, data_path: str = "../../../../VectorStore2/medical_data", **kwargs):
         super().__init__(**kwargs)
         self.data_path = data_path
         self.patients_data = self._load_patient_data()
@@ -36,36 +42,53 @@ class PatientSearchTool(BaseTool):
     def _load_patient_data(self) -> Dict[str, List[Dict]]:
         """환자 데이터를 로드합니다."""
         data = {}
-        departments = ["내과환자", "외과환자", "당일진료환자"]
         
-        for dept in departments:
-            dept_path = os.path.join(self.data_path, dept)
-            print(f"Checking path: {dept_path}")
-            if os.path.exists(dept_path):
-                dept_data = []
-                for file in os.listdir(dept_path):
-                    if file.endswith('.json'):
-                        try:
-                            with open(os.path.join(dept_path, file), 'r', encoding='utf-8') as f:
-                                patient_list = json.load(f)
-                                # JSON 파일이 리스트인 경우 각 환자에 department 추가
-                                if isinstance(patient_list, list):
-                                    for patient in patient_list:
-                                        patient['department'] = dept
-                                        dept_data.append(patient)
-                                else:
-                                    # 단일 환자 객체인 경우
-                                    patient_list['department'] = dept
-                                    dept_data.append(patient_list)
-                        except Exception as e:
-                            print(f"Error loading {file}: {e}")
-                data[dept] = dept_data
+        # VectorStore2/medical_data의 JSON 파일 매핑
+        file_mappings = {
+            "cardiology_patients.json": "심장내과",
+            "emergency_patients.json": "응급의학과", 
+            "internal_medicine_patients.json": "내과",
+            "neurology_patients.json": "신경과",
+            "surgery_patients.json": "외과"
+        }
+        
+        print(f"Loading patient data from: {self.data_path}")
+        
+        for filename, department in file_mappings.items():
+            file_path = os.path.join(self.data_path, filename)
+            print(f"Checking file: {file_path}")
+            
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        patient_list = json.load(f)
+                        dept_data = []
+                        
+                        # JSON 파일이 리스트인 경우 각 환자에 department 추가
+                        if isinstance(patient_list, list):
+                            for patient in patient_list:
+                                patient['department'] = department
+                                dept_data.append(patient)
+                        else:
+                            # 단일 환자 객체인 경우
+                            patient_list['department'] = department
+                            dept_data.append(patient_list)
+                        
+                        data[department] = dept_data
+                        print(f"✅ Loaded {filename}: {len(dept_data)} patients")
+                        
+                except Exception as e:
+                    print(f"❌ Error loading {filename}: {e}")
             else:
-                print(f"Path does not exist: {dept_path}")
+                print(f"❌ File not found: {file_path}")
         
-        print(f"Loaded patient data: {len(data)} departments")
+        print(f"\n📊 총 로드된 데이터: {len(data)} 부서")
+        total_patients = 0
         for dept, patients in data.items():
-            print(f"  {dept}: {len(patients)} patients")
+            patient_count = len(patients)
+            total_patients += patient_count
+            print(f"  🏥 {dept}: {patient_count}명")
+        print(f"  👥 전체 환자 수: {total_patients}명\n")
         
         return data
     
@@ -149,9 +172,10 @@ class VectorSearchTool(BaseTool):
             gemini_vector_path = "/Users/sindong-u/coding/project/hi_medei/GeminiVectorStore/medical_vector_store"
             
             # FAISS 벡터스토어 로드 시도
-            import faiss
             import pickle
-            
+
+            import faiss
+
             # 인덱스 파일들 확인
             index_path = os.path.join(gemini_vector_path, "index.faiss")
             pkl_path = os.path.join(gemini_vector_path, "index.pkl")

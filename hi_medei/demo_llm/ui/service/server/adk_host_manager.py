@@ -2,39 +2,27 @@ import base64
 import datetime
 import json
 import os
-import uuid
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-from dotenv import load_dotenv
-import torch
 import re
+import uuid
 
-from common.types import (
-    AgentCard,
-    DataPart,
-    FileContent,
-    FilePart,
-    Message,
-    Part,
-    Task,
-    TaskArtifactUpdateEvent,
-    TaskState,
-    TaskStatus,
-    TaskStatusUpdateEvent,
-    TextPart,
-)
+import torch
+from common.types import (AgentCard, DataPart, FileContent, FilePart, Message,
+                          Part, Task, TaskArtifactUpdateEvent, TaskState,
+                          TaskStatus, TaskStatusUpdateEvent, TextPart)
+from dotenv import load_dotenv
 from google.adk import Runner
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.events.event import Event as ADKEvent
 from google.adk.events.event_actions import EventActions as ADKEventActions
 from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
-from google.adk.sessions.in_memory_session_service import InMemorySessionService
+from google.adk.sessions.in_memory_session_service import \
+    InMemorySessionService
 from google.genai import types
 from hosts.multiagent.host_agent import HostAgent
-from hosts.multiagent.remote_agent_connection import (
-    TaskCallbackArg,
-)
+from hosts.multiagent.remote_agent_connection import TaskCallbackArg
 from service.server.application_manager import ApplicationManager
 from service.types import Conversation, Event
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from utils.agent_card import get_agent_card
 
 
@@ -88,27 +76,31 @@ class ADKHostManager(ApplicationManager):
         # Map to manage 'lost' message ids until protocol level id is introduced
         self._next_id = {}  # dict[str, str]: previous message to next message
 
-        # .env 파일의 절대 경로를 명시적으로 지정
+        # Load environment variables from .env file
         dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../.env'))
         load_dotenv(dotenv_path)
-        token = "허깅페이스 토큰"
-        if not token:
-            raise ValueError("HUGGINGFACE_TOKEN environment variable is not set")
-            
-        MODEL_NAME = "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-0.5B"
         
+        # Using a public model that doesn't require authentication
+        # token = os.getenv('HUGGINGFACE_TOKEN')
+        # if not token:
+        #     raise ValueError("HUGGINGFACE_TOKEN environment variable is not set")
+            
+        # Temporarily use a simpler model that doesn't require special tokens
+        # MODEL_NAME = "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-0.5B"
+        MODEL_NAME = "microsoft/DialoGPT-medium"  # A conversational model that works well
+        
+        # No token required for public models
         self.tokenizer = AutoTokenizer.from_pretrained(
             MODEL_NAME, 
-            trust_remote_code=True,
-            token=token
+            trust_remote_code=True
         )
+        self.tokenizer.pad_token = self.tokenizer.eos_token  # Fix for DialoGPT
+        
         self.model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME, 
             trust_remote_code=True, 
             torch_dtype=torch.float16,
-            device_map="cpu",
-            token=token,
-            use_cache=True  
+            device_map="cpu"
         )
         self.pipe = pipeline(
             "text-generation",
