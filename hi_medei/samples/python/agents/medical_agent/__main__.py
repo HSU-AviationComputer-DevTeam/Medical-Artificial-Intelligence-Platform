@@ -64,11 +64,17 @@ async def startup_event():
     """서버 시작 시 초기화"""
     global task_manager
     
-    # OpenAI API 키 확인
+    # API 키들 확인
     openai_api_key = os.getenv("OPENAI_API_KEY")
+    gemini_api_key = os.getenv("GEMINI_API_KEY", "AIzaSyCugPmVpRa8d73W8349ftjqMsJWaIj6NHM")  # 제공받은 키를 기본값으로
+    
     if not openai_api_key:
         logger.error("OPENAI_API_KEY 환경변수가 설정되지 않았습니다.")
         raise ValueError("OPENAI_API_KEY is required")
+    
+    print(f"🔑 API 키 상태:")
+    print(f"  - OpenAI: {'✓' if openai_api_key else '✗'}")
+    print(f"  - Gemini: {'✓' if gemini_api_key else '✗'}")
     
     # 데이터 경로 설정 (VectorStore2/medical_data 사용)
     # 현재 스크립트 위치에서 상대 경로로 데이터 디렉토리 찾기
@@ -93,6 +99,7 @@ async def startup_event():
         # 에이전트 초기화
         agent = PatientDataManagerAgent(
             openai_api_key=openai_api_key,
+            gemini_api_key=gemini_api_key,
             data_path=data_path
         )
         

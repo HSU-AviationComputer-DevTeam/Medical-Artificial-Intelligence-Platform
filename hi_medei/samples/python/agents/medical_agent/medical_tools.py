@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import google.generativeai as genai
 import numpy as np
 import pandas as pd
 from langchain.tools import BaseTool
@@ -237,17 +238,65 @@ class PatientSearchTool(BaseTool):
         return False
 
 
+class GeminiEmbeddings:
+    """Gemini 임베딩 클래스 - LangChain 호환"""
+    
+    def __init__(self, api_key: str):
+        genai.configure(api_key=api_key)
+        self.api_key = api_key
+    
+    def __call__(self, text):
+        """LangChain 호환을 위한 callable 메서드"""
+        return self.embed_query(text)
+    
+    def embed_documents(self, texts):
+        """문서 임베딩 (사용하지 않음)"""
+        raise NotImplementedError("이 메서드는 사용하지 않습니다.")
+    
+    def embed_query(self, text):
+        """쿼리 임베딩"""
+        try:
+            # 원래 노트북에서 사용한 정확한 모델 사용 (3072차원)
+            print(f"🔍 Gemini 임베딩 실행: gemini-embedding-exp-03-07")
+            result = genai.embed_content(
+                model="models/gemini-embedding-exp-03-07",
+                content=text,
+                task_type="retrieval_query"  # 노트북에서는 retrieval_document였지만 쿼리에는 retrieval_query
+            )
+            embedding = result['embedding']
+            print(f"✅ 임베딩 성공! 차원: {len(embedding)}")
+            return embedding
+        except Exception as e:
+            print(f"❌ Gemini 임베딩 오류 (gemini-embedding-exp-03-07): {e}")
+            # text-embedding-004로 fallback 시도 
+            try:
+                print("🔄 text-embedding-004 모델로 fallback...")
+                result = genai.embed_content(
+                    model="models/text-embedding-004",
+                    content=text,
+                    task_type="retrieval_query"
+                )
+                embedding = result['embedding']
+                print(f"⚠️ Fallback 성공! 차원: {len(embedding)} (차원 불일치 가능)")
+                return embedding
+            except Exception as e2:
+                print(f"❌ 모든 Gemini 모델 실패: {e2}")
+                raise
+
+
 class VectorSearchTool(BaseTool):
     """벡터 검색 도구 - 유사 증상 환자 검색"""
     
     name: str = "vector_search"
     description: str = "증상을 기반으로 유사한 환자를 벡터 검색으로 찾습니다."
     openai_api_key: str = Field(default="")
+    gemini_api_key: str = Field(default="")
     vectorstore: Optional[str] = Field(default=None)
     
-    def __init__(self, openai_api_key: str, **kwargs):
+    def __init__(self, openai_api_key: str = "", gemini_api_key: str = "", **kwargs):
         super().__init__(**kwargs)
         self.openai_api_key = openai_api_key
+        self.gemini_api_key = gemini_api_key
         self.vectorstore = None
         self._initialize_vectorstore()
     
@@ -265,16 +314,31 @@ class VectorSearchTool(BaseTool):
             # FAISS 벡터스토어 로드 시도
             try:
                 from langchain_community.vectorstores import FAISS
-                from langchain_openai import OpenAIEmbeddings
+
+                # 강제로 Gemini 우선 시도 (3072차원 벡터스토어용)
+                if self.gemini_api_key:
+                    print("🌟 Gemini 임베딩으로 벡터스토어 로드 시도 (3072차원)")
+                    try:
+                        embeddings = GeminiEmbeddings(api_key=self.gemini_api_key)
+                        # FAISS 벡터스토어 로드
+                        self.vectorstore = FAISS.load_local(vector_path, embeddings, allow_dangerous_deserialization=True)
+                        print("✅ FAISS 벡터스토어 로드 성공! (Gemini 3072차원)")
+                        return
+                    except Exception as gemini_error:
+                        print(f"❌ Gemini 로드 실패: {gemini_error}")
+                        print("🔄 OpenAI로 fallback 시도...")
                 
+                # OpenAI API 키가 있으면 OpenAI 임베딩 사용 (1536차원) - Fallback
                 if self.openai_api_key:
+                    print("🔑 OpenAI 임베딩으로 벡터스토어 로드 시도")
+                    from langchain_openai import OpenAIEmbeddings
                     embeddings = OpenAIEmbeddings(openai_api_key=self.openai_api_key)
                     # FAISS 벡터스토어 로드
                     self.vectorstore = FAISS.load_local(vector_path, embeddings, allow_dangerous_deserialization=True)
-                    print("✅ FAISS 벡터스토어 로드 성공!")
+                    print("✅ FAISS 벡터스토어 로드 성공! (OpenAI 1536차원)")
                     return
                 else:
-                    print("⚠️ OpenAI API 키가 없어 벡터스토어를 로드할 수 없습니다.")
+                    print("⚠️ API 키가 없어 벡터스토어를 로드할 수 없습니다.")
             except Exception as e:
                 print(f"❌ FAISS 로드 실패: {e}")
             
@@ -338,26 +402,32 @@ class VectorSearchTool(BaseTool):
                     "search_type": "semantic_vector_search"
                 }, ensure_ascii=False, indent=2)
             
-            # 벡터스토어 파일이 있지만 로드되지 않은 경우
-            elif self.vectorstore in ["faiss_files_found", "chroma_available"]:
-                print(f"⚠️ 벡터스토어 파일은 있지만 OpenAI API 키가 없어 시맨틱 검색을 할 수 없습니다.")
+            # 벡터스토어 파일이 있지만 차원 불일치 등으로 로드되지 않은 경우
+            elif self.vectorstore in ["faiss_files_found", "chroma_available"] or not hasattr(self.vectorstore, 'similarity_search_with_score'):
+                print(f"🧠 벡터 검색 대신 향상된 의미적 키워드 검색 사용")
                 
-                # 대안: JSON 데이터에서 키워드 기반 검색
-                from medical_tools import PatientSearchTool
-                patient_search = PatientSearchTool()
+                # 향상된 의미적 검색 - 다양한 키워드로 확장
+                expanded_queries = self._expand_medical_query(symptoms)
+                print(f"🔍 확장된 검색어: {expanded_queries}")
                 
-                # 증상 기반 검색
-                symptom_results = patient_search._run(symptoms, query_type="symptom")
-                # 진단 기반 검색  
-                diagnosis_results = patient_search._run(symptoms, query_type="diagnosis")
+                all_results = []
+                for query in expanded_queries:
+                    # 증상 기반 검색
+                    symptom_results = self._search_json_data(query, "symptom")
+                    # 진단 기반 검색  
+                    diagnosis_results = self._search_json_data(query, "diagnosis")
+                    all_results.extend(symptom_results + diagnosis_results)
+                
+                # 중복 제거 및 관련성 스코어 계산
+                unique_results = self._deduplicate_and_score(all_results, symptoms)
                 
                 return json.dumps({
-                    "message": "벡터 검색 대신 키워드 기반 검색 사용",
-                    "symptom_search": json.loads(symptom_results),
-                    "diagnosis_search": json.loads(diagnosis_results),
+                    "similar_cases": unique_results[:k],
                     "query": symptoms,
-                    "source": "JSON 키워드 검색 (벡터스토어 사용 불가)",
-                    "note": "OpenAI API 키 설정 시 벡터 검색 가능"
+                    "total_found": len(unique_results),
+                    "source": "향상된 의미적 키워드 검색",
+                    "search_type": "enhanced_semantic_keyword_search",
+                    "expanded_queries": expanded_queries
                 }, ensure_ascii=False, indent=2)
             
             else:
@@ -371,6 +441,135 @@ class VectorSearchTool(BaseTool):
             import traceback
             traceback.print_exc()
             return json.dumps({"error": f"Vector search failed: {str(e)}"}, ensure_ascii=False)
+    
+    def _expand_medical_query(self, query: str) -> List[str]:
+        """의료 쿼리를 의미적으로 확장합니다."""
+        expanded = [query]  # 원본 포함
+        
+        # 의료 용어 확장 매핑
+        medical_expansions = {
+            '당뇨병': ['diabetes', '혈당', '인슐린', '당뇨', 'dm', '제2형 당뇨병', '제1형 당뇨병'],
+            '고혈압': ['hypertension', '혈압', 'htn', '고혈압증', '수축기', '이완기'],
+            '심장': ['cardiac', 'heart', '심근', '관상동맥', '심혈관', '부정맥'],
+            '당뇨': ['diabetes', '혈당', '인슐린', '당뇨병', 'dm'],
+            '통증': ['pain', '아픔', 'ache', '불편감', '압박감'],
+            '호흡': ['respiratory', 'breathing', '숨', '호흡곤란', '기침', '폐'],
+            '혈당': ['glucose', 'sugar', '당뇨', 'diabetes', 'blood sugar']
+        }
+        
+        # 증상 관련 확장
+        symptom_expansions = {
+            '다뇨': ['빈뇨', '소변', '화장실', '야간뇨'],
+            '다갈': ['갈증', '목마름', '수분'],
+            '시야': ['시력', '눈', '망막', '시야장애'],
+            '피로': ['무력감', '기력', '체력', '무기력'],
+            '체중': ['몸무게', '살', '비만', '체중감소', '체중증가']
+        }
+        
+        # 쿼리에서 키워드 찾아서 확장
+        query_lower = query.lower()
+        for keyword, expansions in {**medical_expansions, **symptom_expansions}.items():
+            if keyword in query_lower:
+                expanded.extend(expansions)
+        
+        return list(set(expanded))  # 중복 제거
+    
+    def _search_json_data(self, query: str, search_type: str) -> List[Dict]:
+        """JSON 데이터에서 검색을 수행합니다."""
+        from medical_tools import PatientSearchTool
+        patient_search = PatientSearchTool()
+        
+        try:
+            result = patient_search._run(query, query_type=search_type)
+            result_data = json.loads(result)
+            return result_data.get("patients", [])
+        except:
+            return []
+    
+    def _deduplicate_and_score(self, results: List[Dict], original_query: str) -> List[Dict]:
+        """결과 중복 제거 및 관련성 스코어 계산"""
+        seen_ids = set()
+        unique_results = []
+        
+        for patient in results:
+            patient_id = patient.get('id', '')
+            if patient_id and patient_id not in seen_ids:
+                seen_ids.add(patient_id)
+                
+                # 관련성 스코어 계산 (간단한 키워드 매칭)
+                score = self._calculate_relevance_score(patient, original_query)
+                
+                # 벡터 검색 형태로 변환
+                unique_results.append({
+                    "content": self._patient_to_content(patient),
+                    "metadata": {
+                        "patient_id": patient_id,
+                        "name": patient.get('name', ''),
+                        "department": patient.get('department', ''),
+                        "relevance_type": "keyword_match"
+                    },
+                    "similarity_score": score
+                })
+        
+        # 스코어 기준으로 정렬
+        unique_results.sort(key=lambda x: x["similarity_score"], reverse=True)
+        return unique_results
+    
+    def _calculate_relevance_score(self, patient: Dict, query: str) -> float:
+        """환자와 쿼리의 관련성 스코어를 계산합니다."""
+        score = 0.0
+        query_lower = query.lower()
+        
+        # 진단명 매칭 (높은 가중치)
+        diagnoses = patient.get('diagnoses', [])
+        for diag in diagnoses:
+            if isinstance(diag, dict):
+                diag_name = diag.get('name', '').lower()
+                if query_lower in diag_name or any(word in diag_name for word in query_lower.split()):
+                    score += 0.9
+        
+        # 증상 매칭
+        symptoms = patient.get('symptoms', [])
+        if isinstance(symptoms, list):
+            for symptom in symptoms:
+                if query_lower in symptom.lower():
+                    score += 0.7
+        
+        # 약물 매칭
+        medications = patient.get('medications', [])
+        for med in medications:
+            if isinstance(med, dict):
+                med_name = med.get('medication', '').lower()
+                if query_lower in med_name:
+                    score += 0.5
+        
+        # 기본 스코어 (0.1-1.0 범위로 정규화)
+        return min(max(score, 0.1), 1.0)
+    
+    def _patient_to_content(self, patient: Dict) -> str:
+        """환자 정보를 검색 가능한 텍스트로 변환합니다."""
+        content_parts = []
+        
+        # 기본 정보
+        content_parts.append(f"환자: {patient.get('name', '')} ({patient.get('age', '')}세)")
+        
+        # 진단명
+        diagnoses = patient.get('diagnoses', [])
+        if diagnoses:
+            diag_names = [d.get('name', '') for d in diagnoses if isinstance(d, dict)]
+            content_parts.append(f"진단: {', '.join(diag_names)}")
+        
+        # 증상
+        symptoms = patient.get('symptoms', [])
+        if symptoms:
+            symptoms_text = ', '.join(symptoms) if isinstance(symptoms, list) else str(symptoms)
+            content_parts.append(f"증상: {symptoms_text}")
+        
+        # 부서
+        if patient.get('department'):
+            content_parts.append(f"부서: {patient['department']}")
+        
+        return ' | '.join(content_parts)
 
 
 class SOAPNoteGeneratorTool(BaseTool):
@@ -642,15 +841,20 @@ class HybridSearchTool(BaseTool):
     description: str = "JSON 데이터와 벡터 검색을 결합하여 포괄적인 환자 검색을 수행합니다."
     data_path: str = Field(default="")
     openai_api_key: str = Field(default="")
+    gemini_api_key: str = Field(default="")
     patient_search: Optional[PatientSearchTool] = Field(default=None)
     vector_search: Optional[VectorSearchTool] = Field(default=None)
     
-    def __init__(self, data_path: str, openai_api_key: str, **kwargs):
+    def __init__(self, data_path: str, openai_api_key: str = "", gemini_api_key: str = "", **kwargs):
         super().__init__(**kwargs)
         self.data_path = data_path
         self.openai_api_key = openai_api_key
+        self.gemini_api_key = gemini_api_key
         self.patient_search = PatientSearchTool(data_path=data_path)
-        self.vector_search = VectorSearchTool(openai_api_key=openai_api_key)
+        self.vector_search = VectorSearchTool(
+            openai_api_key=openai_api_key,
+            gemini_api_key=gemini_api_key
+        )
     
     def _run(self, query: str, search_type: str = "comprehensive") -> str:
         """하이브리드 검색을 실행합니다."""

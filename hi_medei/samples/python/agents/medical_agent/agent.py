@@ -48,9 +48,10 @@ class PatientDataManagerAgent:
     불확실한 경우에는 전문의 상담을 권하세요.
     """
     
-    def __init__(self, openai_api_key: str, data_path: str = "/Users/sindong-u/coding/project/hi_medei/data"):
+    def __init__(self, openai_api_key: str, data_path: str = "/Users/sindong-u/coding/project/hi_medei/data", gemini_api_key: str = ""):
         """에이전트를 초기화합니다."""
         self.openai_api_key = openai_api_key
+        self.gemini_api_key = gemini_api_key or os.getenv('GEMINI_API_KEY', '')
         self.data_path = data_path
         
         # LLM 초기화
@@ -127,15 +128,19 @@ class PatientDataManagerAgent:
             tools.append(patient_search_tool)
             print(f"[DEBUG] PatientSearchTool 초기화 완료: {self.data_path}")
             
-            # 벡터 검색 도구
-            vector_search_tool = VectorSearchTool(openai_api_key=self.openai_api_key)
+            # 벡터 검색 도구 (Gemini + OpenAI 지원)
+            vector_search_tool = VectorSearchTool(
+                openai_api_key=self.openai_api_key,
+                gemini_api_key=self.gemini_api_key
+            )
             tools.append(vector_search_tool)
-            print(f"[DEBUG] VectorSearchTool 초기화 완료")
+            print(f"[DEBUG] VectorSearchTool 초기화 완료 (Gemini: {'✓' if self.gemini_api_key else '✗'}, OpenAI: {'✓' if self.openai_api_key else '✗'})")
             
             # 하이브리드 검색 도구 (JSON + Vector)
             hybrid_search_tool = HybridSearchTool(
                 data_path=self.data_path, 
-                openai_api_key=self.openai_api_key
+                openai_api_key=self.openai_api_key,
+                gemini_api_key=self.gemini_api_key
             )
             tools.append(hybrid_search_tool)
             print(f"[DEBUG] HybridSearchTool 초기화 완료")
