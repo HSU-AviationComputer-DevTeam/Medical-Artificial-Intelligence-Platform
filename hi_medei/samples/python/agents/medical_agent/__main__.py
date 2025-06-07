@@ -202,6 +202,95 @@ async def handle_jsonrpc(request: JSONRPCRequest):
                 result=result
             )
             
+        elif method == "mcp/connect":
+            # MCP 서버 연결 테스트
+            endpoint = params.get("endpoint", "pubmed")
+            
+            from mcp_client import get_mcp_client
+            client = await get_mcp_client()
+            result = await client.test_connection(endpoint)
+            
+            return JSONRPCResponse(
+                id=request.id,
+                result=result
+            )
+            
+        elif method == "mcp/list_endpoints":
+            # 사용 가능한 MCP 엔드포인트 목록 반환
+            from mcp_client import get_mcp_client
+            client = await get_mcp_client()
+            result = await client.get_all_endpoints()
+            
+            return JSONRPCResponse(
+                id=request.id,
+                result=result
+            )
+            
+        elif method == "mcp/search_pubmed":
+            # PubMed 논문 검색
+            query = params.get("query", "")
+            max_results = params.get("max_results", 5)
+            
+            from mcp_client import get_mcp_client
+            client = await get_mcp_client()
+            result = await client.search_pubmed(query, max_results)
+            
+            return JSONRPCResponse(
+                id=request.id,
+                result=result
+            )
+            
+        elif method == "mcp/search_medical_condition":
+            # 의학적 상태 연구 검색
+            condition = params.get("condition", "")
+            max_results = params.get("max_results", 5)
+            
+            from mcp_client import get_mcp_client
+            client = await get_mcp_client()
+            result = await client.search_medical_condition(condition, max_results)
+            
+            return JSONRPCResponse(
+                id=request.id,
+                result=result
+            )
+            
+        elif method == "mcp/save_memory":
+            # 메모리에 정보 저장
+            session_id = params.get("session_id", "default")
+            content = params.get("content", "")
+            entry_type = params.get("entry_type", "conversation")
+            patient_id = params.get("patient_id")
+            
+            from mcp_client import get_mcp_client
+            client = await get_mcp_client()
+            result = await client.save_memory(session_id, content, entry_type, patient_id)
+            
+            return JSONRPCResponse(
+                id=request.id,
+                result=result
+            )
+            
+        elif method == "mcp/get_memory":
+            # 메모리 조회
+            session_id = params.get("session_id")
+            patient_id = params.get("patient_id")
+            limit = params.get("limit", 50)
+            
+            from mcp_client import get_mcp_client
+            client = await get_mcp_client()
+            
+            if session_id:
+                result = await client.get_session_memory(session_id, limit)
+            elif patient_id:
+                result = await client.get_patient_memory(patient_id, limit)
+            else:
+                result = {"success": False, "error": "session_id 또는 patient_id가 필요합니다."}
+            
+            return JSONRPCResponse(
+                id=request.id,
+                result=result
+            )
+            
         else:
             return JSONRPCResponse(
                 id=request.id,

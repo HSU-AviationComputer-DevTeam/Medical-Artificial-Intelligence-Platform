@@ -231,11 +231,32 @@ class PatientDataManagerAgent:
                         else:
                             return f"'{re.search(pattern, query).group()}' 환자의 정보를 찾을 수 없습니다."
         
-        # 질병명 검색 - 벡터 검색 우선!
+        # 질병명 검색 - MCP 우선 시도!
         diseases = ['당뇨병', '고혈압', '담낭염', '위염', '감기', '독감', '환자']
+        research_keywords = ['연구', '논문', '치료법', '최신', 'research', 'treatment', 'study']
+        
         for disease in diseases:
             if disease in query:
-                print(f"[DEBUG] 질병명 발견: {disease} - 벡터 검색 우선 실행")
+                # 연구/논문 관련 키워드가 있으면 MCP 우선 사용
+                if any(keyword in query for keyword in research_keywords):
+                    print(f"[DEBUG] 질병명 + 연구 키워드 발견: {disease} - MCP 우선 실행")
+                    # MCP PubMed 검색 시도
+                    for tool in self.tools:
+                        if tool.name == "mcp_connector":
+                            result = tool._run(f"{disease} latest research", "pubmed")
+                            result_data = json.loads(result)
+                            if result_data.get("success"):
+                                mcp_result = result_data.get("mcp_result", {})
+                                if mcp_result.get("success"):
+                                    articles = mcp_result.get("articles", [])
+                                    if articles:
+                                        response = f"📚 **MCP PubMed 검색 결과 ({disease})**:\n"
+                                        for i, article in enumerate(articles[:3], 1):
+                                            response += f"{i}. {article.get('title', 'N/A')} (PMID: {article.get('pmid', 'N/A')})\n"
+                                        return response
+                                return f"📚 **MCP PubMed 검색 완료**: {disease} 관련 논문 검색됨"
+                
+                print(f"[DEBUG] 질병명 발견: {disease} - 하이브리드 검색 실행")
                 # hybrid_search 도구 사용 (벡터 + JSON 결합)
                 for tool in self.tools:
                     if tool.name == "hybrid_search":

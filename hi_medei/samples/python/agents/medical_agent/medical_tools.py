@@ -1,14 +1,17 @@
 """Medical tools for patient search, document generation, and analysis."""
 
+import asyncio
 import json
 import os
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import aiohttp
 import google.generativeai as genai
 import numpy as np
 import pandas as pd
+import requests
 from langchain.tools import BaseTool
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
@@ -911,40 +914,141 @@ class MCPConnectorTool(BaseTool):
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # 실제 MCP 서버 엔드포인트로 수정
         self.mcp_endpoints = {
-            "hospital_db": "http://localhost:8080/mcp/hospital",
-            "medical_records": "http://localhost:8081/mcp/records",
-            "drug_database": "http://localhost:8082/mcp/drugs"
+            "pubmed": "http://localhost:8080",
+            "memory": "http://localhost:8081", 
+            "hospital_db": "http://localhost:8080",
+            "medical_records": "http://localhost:8081"
         }
+    
+    async def _call_mcp_async(self, endpoint_url: str, query: str) -> Dict[str, Any]:
+        """비동기 MCP 호출"""
+        try:
+            # MCP JSON-RPC 요청 포맷
+            mcp_request = {
+                "jsonrpc": "2.0",
+                "method": "search",
+                "params": {
+                    "query": query,
+                    "context": "medical_data"
+                },
+                "id": 1
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    endpoint_url,
+                    json=mcp_request,
+                    headers={"Content-Type": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return result
+                    else:
+                        return {
+                            "error": f"HTTP {response.status}: {await response.text()}"
+                        }
+        except Exception as e:
+            return {"error": f"MCP 연결 실패: {str(e)}"}
+    
+    def _call_mcp_sync(self, endpoint_url: str, query: str) -> Dict[str, Any]:
+        """동기 MCP 호출 - 실제 MCP 서버 API 형식"""
+        try:
+            # PubMed 서버인 경우
+            if "8080" in endpoint_url:
+                mcp_request = {
+                    "parameters": {
+                        "query": query,
+                        "max_results": 5
+                    }
+                }
+                response = requests.post(
+                    f"{endpoint_url}/tools/search_pubmed",
+                    json=mcp_request,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30
+                )
+            # Memory 서버인 경우  
+            elif "8081" in endpoint_url:
+                mcp_request = {
+                    "parameters": {
+                        "session_id": "agent_session",
+                        "content": f"Agent searched for: {query}",
+                        "entry_type": "agent_search"
+                    }
+                }
+                response = requests.post(
+                    f"{endpoint_url}/tools/save_memory",
+                    json=mcp_request,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30
+                )
+            else:
+                return {"error": f"Unknown MCP server: {endpoint_url}"}
+            
+            if response.status_code == 200:
+                return {
+                    "success": True,
+                    "mcp_result": response.json(),
+                    "endpoint": endpoint_url
+                }
+            else:
+                return {
+                    "error": f"HTTP {response.status_code}: {response.text}"
+                }
+        except Exception as e:
+            return {"error": f"MCP 연결 실패: {str(e)}"}
     
     def _run(self, query: str, endpoint: str = "hospital_db") -> str:
         """MCP를 통해 외부 시스템에 쿼리를 전송합니다."""
         try:
-            # 실제 구현에서는 HTTP 요청을 보냄
-            # 현재는 시뮬레이션된 응답 반환
-            
             if endpoint not in self.mcp_endpoints:
                 return json.dumps({"error": f"Unknown endpoint: {endpoint}"})
             
-            # 시뮬레이션된 MCP 응답
-            mcp_response = {
-                "endpoint": endpoint,
-                "query": query,
-                "status": "success",
-                "data": {
-                    "message": f"MCP 연결을 통해 {endpoint}에서 '{query}' 검색 완료",
-                    "external_results": [
-                        {
-                            "source": endpoint,
-                            "content": f"{query}와 관련된 외부 데이터",
-                            "confidence": 0.9
-                        }
-                    ]
-                },
-                "timestamp": datetime.now().isoformat()
-            }
+            endpoint_url = self.mcp_endpoints[endpoint]
+            
+            # 실제 MCP 서버가 동작중인지 확인하고 호출
+            try:
+                # 먼저 ping을 통해 서버 상태 확인
+                ping_response = requests.get(f"{endpoint_url}/health", timeout=5)
+                if ping_response.status_code == 200:
+                    # 실제 MCP 서버가 있으면 호출
+                    mcp_response = self._call_mcp_sync(endpoint_url, query)
+                else:
+                    # 서버가 없으면 시뮬레이션 응답
+                    mcp_response = self._create_simulation_response(endpoint, query)
+            except (requests.ConnectionError, requests.Timeout):
+                # 연결 실패시 시뮬레이션 응답
+                mcp_response = self._create_simulation_response(endpoint, query)
             
             return json.dumps(mcp_response, ensure_ascii=False, indent=2)
             
         except Exception as e:
-            return json.dumps({"error": f"MCP connection failed: {e}"}) 
+            return json.dumps({"error": f"MCP connection failed: {e}"})
+    
+    def _create_simulation_response(self, endpoint: str, query: str) -> Dict[str, Any]:
+        """MCP 서버가 없을 때 시뮬레이션 응답 생성"""
+        return {
+            "jsonrpc": "2.0",
+            "result": {
+                "endpoint": endpoint,
+                "query": query,
+                "status": "simulated",
+                "data": {
+                    "message": f"MCP 시뮬레이션: {endpoint}에서 '{query}' 검색 완료",
+                    "external_results": [
+                        {
+                            "source": endpoint,
+                            "content": f"{query}와 관련된 외부 의료 데이터 (시뮬레이션)",
+                            "confidence": 0.8,
+                            "type": "simulation"
+                        }
+                    ]
+                },
+                "timestamp": datetime.now().isoformat(),
+                "simulation": True
+            },
+            "id": 1
+        } 

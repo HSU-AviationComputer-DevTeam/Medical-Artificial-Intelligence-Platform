@@ -4,8 +4,8 @@ import asyncio
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, AsyncIterable
 from enum import Enum
+from typing import Any, AsyncIterable, Dict, List, Optional
 
 from agent import PatientDataManagerAgent
 
@@ -273,81 +273,63 @@ class TaskManager:
             return str(message)
     
     def get_agent_card(self) -> Dict[str, Any]:
-        """A2A 표준 에이전트 카드 정보를 반환합니다."""
+        """A2A 표준 에이전트 카드 반환"""
         return {
             "name": "Patient Data Manager Agent",
-            "description": "병원 내 환자 검색 및 진료문서 작성을 위한 의료 AI 에이전트",
+            "description": "병원 내 환자 검색 및 진료문서 작성을 위한 의료 AI 에이전트. MCP 프로토콜을 통한 외부 의료 시스템 연동 지원.",
+            "url": "http://localhost:10001/",
             "version": "1.0.0",
-            "url": "http://localhost:10001",
-            "provider": {
-                "organization": "Hi-Medei Medical AI",
-                "name": "Medical Agent Provider"
-            },
+            "defaultInputModes": ["text/plain", "application/json"],
+            "defaultOutputModes": ["text/plain", "application/json"],
             "capabilities": {
                 "streaming": True,
-                "pushNotifications": False
+                "pushNotifications": False,
+                "stateTransitionHistory": True,
+                "mcp_support": True  # MCP 지원 추가
             },
-            "defaultInputModes": ["text/plain"],
-            "defaultOutputModes": ["text/plain", "application/json"],
             "skills": [
                 {
                     "id": "patient_search",
                     "name": "환자 검색",
-                    "description": "환자 검색 및 정보 조회",
-                    "tags": ["medical", "patient", "search"],
-                    "inputModes": ["text/plain"],
-                    "outputModes": ["text/plain", "application/json"],
-                    "examples": [
-                        "홍길1 환자 정보를 찾아주세요",
-                        "당뇨병 환자 목록을 보여주세요"
-                    ]
+                    "description": "환자 이름, ID, 진료과 등을 기준으로 환자 정보를 검색합니다.",
+                    "tags": ["patient", "search", "medical"],
+                    "examples": ["김철수 환자를 찾아주세요.", "내과 환자 목록을 보여주세요."]
                 },
                 {
-                    "id": "vector_search",
-                    "name": "유사 증상 검색", 
-                    "description": "유사 증상 환자 벡터 검색",
-                    "tags": ["medical", "symptoms", "vector", "search"],
-                    "inputModes": ["text/plain"],
-                    "outputModes": ["text/plain", "application/json"],
-                    "examples": [
-                        "당뇨병과 유사한 증상의 환자를 찾아주세요"
-                    ]
-                },
-                {
-                    "id": "soap_note_generation",
-                    "name": "SOAP 노트 생성",
-                    "description": "SOAP 노트 자동 생성",
-                    "tags": ["medical", "soap", "documentation"],
-                    "inputModes": ["text/plain", "application/json"],
-                    "outputModes": ["text/plain"],
-                    "examples": [
-                        "홍길1 환자의 SOAP 노트를 작성해주세요"
-                    ]
+                    "id": "medical_document_generation",
+                    "name": "진료문서 작성",
+                    "description": "SOAP 노트, 진료 기록 등 의료 문서를 자동 생성합니다.",
+                    "tags": ["document", "soap", "medical record"],
+                    "examples": ["SOAP 노트를 작성해주세요.", "진료 기록을 정리해주세요."]
                 },
                 {
                     "id": "drug_interaction_check",
                     "name": "약물 상호작용 검사",
-                    "description": "약물 상호작용 검사",
-                    "tags": ["medical", "drugs", "interaction", "safety"],
-                    "inputModes": ["text/plain", "application/json"],
-                    "outputModes": ["text/plain"],
-                    "examples": [
-                        "메트포르민과 아스피린의 상호작용을 확인해주세요"
-                    ]
+                    "description": "처방된 약물들 간의 상호작용을 검사하고 위험도를 평가합니다.",
+                    "tags": ["drug", "interaction", "safety"],
+                    "examples": ["이 약물들의 상호작용을 확인해주세요.", "약물 안전성을 검토해주세요."]
                 },
                 {
-                    "id": "urgency_assessment",
-                    "name": "응급도 평가",
-                    "description": "응급도 평가",
-                    "tags": ["medical", "emergency", "triage"],
-                    "inputModes": ["text/plain", "application/json"],
-                    "outputModes": ["text/plain"],
-                    "examples": [
-                        "환자의 응급도를 평가해주세요"
-                    ]
+                    "id": "mcp_integration",
+                    "name": "MCP 외부 시스템 연동",
+                    "description": "Model Context Protocol을 통해 외부 의료 데이터베이스 및 시스템과 연동합니다.",
+                    "tags": ["mcp", "integration", "external", "database"],
+                    "examples": ["병원 데이터베이스에서 검사 결과를 조회해주세요.", "외부 의료 시스템에서 환자 정보를 가져와주세요."]
                 }
             ],
+            "provider": {
+                "name": "Medical AI Platform",
+                "organization": "Healthcare Innovation Lab"
+            },
             "authentication": {
                 "schemes": ["public"]
+            },
+            # MCP 관련 추가 메타데이터
+            "mcp_endpoints": {
+                "hospital_db": "http://localhost:8080/mcp/hospital",
+                "medical_records": "http://localhost:8081/mcp/records",
+                "drug_database": "http://localhost:8082/mcp/drugs",
+                "lab_results": "http://localhost:8083/mcp/lab",
+                "imaging": "http://localhost:8084/mcp/imaging"
             }
         } 
