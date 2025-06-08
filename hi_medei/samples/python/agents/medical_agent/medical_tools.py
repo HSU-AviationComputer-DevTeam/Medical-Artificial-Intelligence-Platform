@@ -834,7 +834,7 @@ class UrgencyAssessmentTool(BaseTool):
             ]
         }
         
-        return recommendations.get(urgency_level, [])
+        return recommendations.get(urgency_level, []) 
 
 
 class HybridSearchTool(BaseTool):

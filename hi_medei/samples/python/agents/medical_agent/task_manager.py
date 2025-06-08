@@ -62,7 +62,7 @@ class TaskManager:
             }
         
         if session_id:
-            self.sessions[session_id]["tasks"].append(task_id)
+        self.sessions[session_id]["tasks"].append(task_id)
         
         try:
             # 태스크 실행
@@ -157,16 +157,16 @@ class TaskManager:
             final_content = ""
             if hasattr(self.agent, 'stream'):
                 async for chunk in self.agent.stream(user_input, session_id or "default"):
-                    if chunk.get("type") == "final_result":
-                        final_content = chunk.get("content", "")
-                        break
-                    elif chunk.get("type") == "status":
-                        # 중간 상태 업데이트
-                        yield {
-                            "id": task["id"],
-                            "status": {
+                if chunk.get("type") == "final_result":
+                    final_content = chunk.get("content", "")
+                    break
+                elif chunk.get("type") == "status":
+                    # 중간 상태 업데이트
+                    yield {
+                        "id": task["id"],
+                        "status": {
                                 "state": TaskState.WORKING,
-                                "timestamp": datetime.now().isoformat(),
+                            "timestamp": datetime.now().isoformat(),
                                 "message": {
                                     "role": "assistant",
                                     "parts": [{
@@ -174,7 +174,7 @@ class TaskManager:
                                         "text": chunk.get("content", "")
                                     }]
                                 }
-                            },
+                        },
                             "final": False
                         }
             else:

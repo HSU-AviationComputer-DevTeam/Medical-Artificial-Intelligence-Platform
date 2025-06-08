@@ -84,10 +84,10 @@ class PatientDataManagerAgent:
         - 환자 이름 (예: "홍길1") → patient_search 도구 필수
         - 질병명 (예: "당뇨병") → patient_search 도구 필수
         - 증상 관련 → hybrid_search 도구 필수
-        
-        사용 가능한 도구들:
-        {tools}
-
+            
+            사용 가능한 도구들:
+            {tools}
+            
         **형식을 정확히 따르세요**:
 
         Question: {input}
