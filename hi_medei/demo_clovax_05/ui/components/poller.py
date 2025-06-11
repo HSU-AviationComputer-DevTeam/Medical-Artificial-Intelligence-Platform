@@ -54,7 +54,5 @@ def on_change(e: me.ButtonToggleChangeEvent):
 
 async def force_refresh(e: me.ClickEvent):
     """Refresh app state event handler"""
-    yield
     app_state = me.state(AppState)
     await UpdateAppState(app_state, app_state.current_conversation_id)
-    yield

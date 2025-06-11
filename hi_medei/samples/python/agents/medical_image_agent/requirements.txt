@@ -1,0 +1,30 @@
+# Ultra-Simplified Medical Image Agent Dependencies
+
+# Core Framework
+fastapi>=0.104.1
+uvicorn>=0.24.0
+pydantic>=2.5.0
+
+# A2A Server Dependencies
+starlette>=0.32.0
+sse-starlette>=1.6.5
+
+# HTTP and Async
+httpx>=0.25.2
+aiofiles>=23.2.1
+
+# OpenAI API
+openai>=1.6.1
+
+# Basic Image Processing (for base64 handling only)
+Pillow>=10.1.0
+
+# A2A Protocol
+jsonrpcclient>=4.0.3
+jsonrpcserver>=5.0.9
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# Logging and Utils
+python-multipart>=0.0.6 

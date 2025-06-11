@@ -58,7 +58,6 @@ async def add_conversation(e: me.ClickEvent):  # pylint: disable=unused-argument
         '/conversation',
         query_params={'conversation_id': response.conversation_id},
     )
-    yield
 
 
 def on_click(e: me.TableClickEvent):
@@ -67,4 +66,3 @@ def on_click(e: me.TableClickEvent):
     state.current_conversation_id = conversation.conversation_id
     me.query_params.update({'conversation_id': conversation.conversation_id})
     me.navigate('/conversation', query_params=me.query_params)
-    yield

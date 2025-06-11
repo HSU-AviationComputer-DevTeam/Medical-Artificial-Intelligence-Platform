@@ -17,10 +17,8 @@ from .side_nav import sidenav
 
 async def refresh_app_state(e: mel.WebEvent):  # pylint: disable=unused-argument
     """Refresh app state event handler"""
-    yield
     app_state = me.state(AppState)
     await UpdateAppState(app_state, app_state.current_conversation_id)
-    yield
 
 
 @me.content_component

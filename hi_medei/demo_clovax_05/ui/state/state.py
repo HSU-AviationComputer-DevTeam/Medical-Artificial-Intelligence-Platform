@@ -97,6 +97,9 @@ class AppState:
     uploaded_pdfs: list[str] = dataclasses.field(default_factory=list)
     last_uploaded_pdf: str = ''
     pdf_upload_message: str = ''
+    
+    # 의료 영상 업로드/상태 관리
+    temp_image_data: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
 
 
 @me.stateclass

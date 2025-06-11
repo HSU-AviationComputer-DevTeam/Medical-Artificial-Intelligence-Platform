@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medical-image-agent"
+version = "0.1.0"
+description = "Medical Image Analysis Agent with A2A Protocol and MCP Integration"
+authors = [
+    {name = "Medical AI Team"}
+]
+dependencies = [
+    # Core AI/ML frameworks
+    "langchain>=0.1.0",
+    "langchain-openai>=0.1.0",
+    "langchain-community>=0.0.20",
+    "langgraph>=0.0.40",
+    
+    # Image processing and computer vision
+    "opencv-python>=4.8.0",
+    "pillow>=10.0.0",
+    "scikit-image>=0.21.0",
+    "imageio>=2.31.0",
+    
+    # Medical image processing
+    "pydicom>=2.4.0",
+    "nibabel>=5.1.0",
+    "simpleitk>=2.3.0",
+    
+    # Machine learning and deep learning
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "transformers>=4.30.0",
+    "timm>=0.9.0",
+    
+    # Data processing
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    
+    # Web framework and protocols
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+    "httpx>=0.24.0",
+    "aiofiles>=23.0.0",
+    "python-multipart>=0.0.6",
+    
+    # Utilities
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "click>=8.1.0",
+    "tqdm>=4.65.0",
+    
+    # A2A Protocol support
+
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "jupyter>=1.0.0",
+]
+
+gpu = [
+    "torch[cu118]>=2.0.0",
+    "torchvision[cu118]>=0.15.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.uv.sources]
+a2a-samples = { workspace = true } 
