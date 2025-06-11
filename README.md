@@ -266,7 +266,6 @@ Medical-Artificial-Intelligence-Platform/
 ### 새로운 MCP 서버 추가
 
 ```python
-# mcp_config.py에 새 엔드포인트 추가
 new_endpoint = MCPEndpoint(
     name="new_system",
     url="http://localhost:8085/mcp/new",
@@ -285,7 +284,6 @@ class CustomMedicalTool(BaseTool):
     description = "커스텀 의료 도구"
     
     def _run(self, query: str) -> str:
-        # 도구 로직 구현
         return "처리 결과"
 ```
 
