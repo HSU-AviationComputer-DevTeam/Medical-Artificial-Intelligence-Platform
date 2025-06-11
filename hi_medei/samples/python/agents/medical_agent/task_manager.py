@@ -75,7 +75,7 @@ class TaskManager:
             print(f"[DEBUG] 세션 ID: {session_id}")
             
             # 에이전트 실행
-            result = self.agent.invoke(user_input, session_id or "default")
+            result = await self.agent.invoke(user_input, session_id or "default")
             print(f"[DEBUG] 에이전트 실행 결과: {result}")
             
             # 결과 처리
@@ -179,7 +179,7 @@ class TaskManager:
                         }
             else:
                 # 스트리밍을 지원하지 않는 경우 일반 invoke 사용
-                result = self.agent.invoke(user_input, session_id or "default")
+                result = await self.agent.invoke(user_input, session_id or "default")
                 final_content = result.get("content", "")
             
             # 최종 결과 처리
