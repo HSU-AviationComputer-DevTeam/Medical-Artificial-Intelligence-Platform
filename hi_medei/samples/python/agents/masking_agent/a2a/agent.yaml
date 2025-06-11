@@ -1,0 +1,27 @@
+id: korean-masking-agent
+name: Korean Name + Phone Masker
+description: 한국어 문장에서 이름(3글자)과 전화번호를 마스킹하는 에이전트입니다.
+version: 1.0.0
+language: ko
+type: REST
+entry_point: http://localhost:8000/a2a
+input:
+  type: object
+  properties:
+    text:
+      type: string
+      description: 마스킹할 문장
+output:
+  type: object
+  properties:
+    status:
+      type: string
+    output:
+      type: object
+      properties:
+        masked_text:
+          type: string
+tags:
+  - masking
+  - korean
+  - presidio

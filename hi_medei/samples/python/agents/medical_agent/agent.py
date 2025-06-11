@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 from typing import Any, AsyncIterable, Dict, List, Optional
 
+import httpx
 from langchain import hub
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain.memory import ConversationBufferMemory
@@ -112,7 +113,7 @@ class PatientDataManagerAgent:
             tools=self.tools,
             memory=self.memory,
             verbose=True,
-            max_iterations=3,
+            max_iterations=3, # 5
             handle_parsing_errors=True,
             return_intermediate_steps=True,
             early_stopping_method="force"
@@ -171,7 +172,32 @@ class PatientDataManagerAgent:
         print(f"[DEBUG] 총 {len(tools)}개 도구 초기화 완료")
         return tools
     
-    def invoke(self, query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+    async def _mask_response(self, text: str) -> str:
+        """masking_agent를 호출하여 응답의 민감정보를 마스킹합니다."""
+        masking_agent_url = "http://localhost:8000/a2a"  # masking_agent 주소
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(masking_agent_url, json={"text": text}, timeout=5.0)
+                response.raise_for_status()
+                masked_data = response.json()
+                
+                # 'tool' 키와 'output' 키 확인
+                if "tool" in masked_data and "output" in masked_data["tool"]:
+                    masked_text = masked_data["tool"]["output"].get("masked_text", text)
+                    print(f"[DEBUG] 마스킹된 응답: {masked_text}")
+                    return masked_text
+                else:
+                    print(f"[WARNING] 마스킹 응답 형식이 올바르지 않습니다: {masked_data}")
+                    return text # 원본 텍스트 반환
+
+        except httpx.RequestError as e:
+            print(f"[ERROR] Masking agent 연결 실패: {e}")
+            return text # 마스킹 실패 시 원본 텍스트 반환
+        except Exception as e:
+            print(f"[ERROR] 마스킹 중 알 수 없는 오류: {e}")
+            return text
+            
+    async def invoke(self, query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
         """동기 방식으로 쿼리를 처리합니다."""
         try:
             print(f"[DEBUG] 쿼리 수신: {query}")
@@ -180,17 +206,20 @@ class PatientDataManagerAgent:
             
             # 쿼리 분석해서 적절한 도구 직접 호출
             response_content = self._analyze_and_execute_query(query)
-            print(f"[DEBUG] 응답 생성 완료: {response_content[:100]}...")
+            print(f"[DEBUG] 원본 응답 생성 완료: {response_content[:100]}...")
+
+            # 응답 마스킹
+            masked_response = await self._mask_response(response_content)
             
             # 메모리에 대화 추가
             from langchain.schema import AIMessage, HumanMessage
             self.memory.chat_memory.add_user_message(query)
-            self.memory.chat_memory.add_ai_message(response_content)
+            self.memory.chat_memory.add_ai_message(masked_response) # 마스킹된 응답을 메모리에 저장
             
             return {
                 "is_task_complete": True,
                 "require_user_input": False,
-                "content": response_content,
+                "content": masked_response,
                 "session_id": session_id,
                 "timestamp": datetime.now().isoformat()
             }
@@ -317,7 +346,7 @@ class PatientDataManagerAgent:
                     return response if json_count > 0 or vector_count > 0 else "검색 결과가 없습니다."
         
         # 기본 응답
-        return "의료 데이터 검색을 위해 환자 이름이나 질병명을 포함해서 질문해주세요. 예: '홍길1 환자 정보', '당뇨병 환자들'"
+        return "의료 데이터 검색을 위해 환자 이름이나 질병명을 포함해서 질문해주세요. 예: '홍길동 환자 정보', '당뇨병 환자들'"
     
     async def stream(self, query: str, session_id: Optional[str] = None) -> AsyncIterable[Dict[str, Any]]:
         """스트리밍 방식으로 쿼리를 처리합니다."""
@@ -335,11 +364,17 @@ class PatientDataManagerAgent:
                 "input": query,
                 "chat_history": self.memory.chat_memory.messages
             })
+
+            final_content = result.get("output", "처리 완료")
+            print(f"[DEBUG] 스트리밍 원본 응답: {final_content[:100]}...")
+
+            # 최종 응답 마스킹
+            masked_final_content = await self._mask_response(final_content)
             
             # 최종 결과 반환
             yield {
                 "type": "final_result",
-                "content": result.get("output", "처리 완료"),
+                "content": masked_final_content,
                 "is_task_complete": True,
                 "require_user_input": False,
                 "session_id": session_id,

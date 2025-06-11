@@ -195,7 +195,7 @@ async def handle_jsonrpc(request: JSONRPCRequest):
             query = params.get("query", "")
             session_id = params.get("session_id", "default")
             
-            result = task_manager.agent.invoke(query, session_id)
+            result = await task_manager.agent.invoke(query, session_id)
             
             return JSONRPCResponse(
                 id=request.id,
