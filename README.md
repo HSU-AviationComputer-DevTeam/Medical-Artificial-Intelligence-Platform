@@ -31,7 +31,7 @@
       Dongwoo Shin
     </td>
     <td>
-      Hyeonseong Jeon
+      Hyunseong Jeon
     </td>
     <td>
       Seongin Hong
@@ -45,7 +45,7 @@
       dongwoo  
     </td>
     <td>
-      hyeonseong
+      hyunseong
     </td>
     <td>
       Building MCP servers, loading MCPs, building vector stores, generating virtual medical patient data, connecting AI agents to MCPs
